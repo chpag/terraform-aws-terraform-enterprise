@@ -8,7 +8,7 @@ data "aws_ami" "ubuntu" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+    values = [var.tfe_os_ami_name[var.tfe_os]]
   }
 
   filter {
@@ -16,7 +16,7 @@ data "aws_ami" "ubuntu" {
     values = ["hvm"]
   }
 
-  owners = ["099720109477"] # Canonical
+  owners = [var.tfe_os_ami_owner[var.tfe_os]]
 }
 
 data "aws_kms_key" "main" {
