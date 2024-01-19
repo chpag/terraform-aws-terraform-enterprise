@@ -679,15 +679,15 @@ variable "tfe_os_ami_name" {
   type       = map(string)
   default    = {
     "ubuntu" = "ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"
-    "rhel"   = ""
+    "rhel"   = "RHEL-9.3.0_HVM-20231101-x86_64-5-Hourly2-GP2"
   }
 }
 
 variable "tfe_os_ami_owner {
   type       = map(string)
   default    = {
-    "ubuntu" = "ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"
-    "rhel"   = ""
+    "ubuntu" = "099720109477" # Canonical
+    "rhel"   = "309956199498" # Amazon
   }
 }
 
