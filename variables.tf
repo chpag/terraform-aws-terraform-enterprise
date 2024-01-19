@@ -665,3 +665,23 @@ variable "extern_vault_token_renew" {
   description = "(Optional if var.extern_vault_enable = true) How often (in seconds) to renew the Vault token."
 }
 
+variable "tfe_os" {
+  default    = "ubuntu"
+  type       = string
+  description = "(Optional) OS Type for TFE ( ubuntu or rhel )
+  validation {
+    condition     = var.tfe_os == "ubuntu" || var.tfe_os == "rhel"
+    error_message = "The tfe_os value must be \"ubuntu\" or \"rhel\""
+  }
+}
+
+variable "tfe_os_ami" {
+  type       = map(string)
+  default    = {
+    "ubuntu" = ""
+    "rhel"   = ""
+  }
+}
+
+
+}
