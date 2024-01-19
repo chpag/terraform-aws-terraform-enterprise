@@ -24,7 +24,7 @@ data "aws_kms_key" "main" {
 }
 
 # -----------------------------------------------------------------------------
-# AWS Service Accounts 
+# AWS Service Accounts
 # -----------------------------------------------------------------------------
 module "service_accounts" {
   source = "./modules/service_accounts"
@@ -120,22 +120,31 @@ module "docker_compose_config" {
   source = "git::https://github.com/hashicorp/terraform-random-tfe-utility//modules/docker_compose_config?ref=main"
   count  = var.is_replicated_deployment ? 0 : 1
 
+  tfe_license = var.hc_license
+
+  disk_path                 = var.operational_mode == "disk" ? var.disk_path : null
   hostname                  = local.fqdn
-  tfe_license               = var.hc_license
+  http_port                 = var.http_port
+  https_port                = var.https_port
+  http_proxy                = var.proxy_ip != null ? "${var.proxy_ip}:${var.proxy_port}" : null
+  https_proxy               = var.proxy_ip != null ? "${var.proxy_ip}:${var.proxy_port}" : null
+  no_proxy                  = var.proxy_ip != null ? local.no_proxy : null
   license_reporting_opt_out = var.license_reporting_opt_out
-  operational_mode          = var.operational_mode
-  cert_file                 = var.tls_bootstrap_cert_pathname
-  key_file                  = var.tls_bootstrap_key_pathname
-  tfe_image                 = var.tfe_image
-  tls_ca_bundle_file        = var.tls_ca_bundle_file
-  tls_ciphers               = var.tls_ciphers
-  tls_version               = var.tls_version
-  run_pipeline_image        = var.run_pipeline_image
-  capacity_concurrency      = var.capacity_concurrency
-  capacity_cpu              = var.capacity_cpu
-  capacity_memory           = var.capacity_memory
-  iact_subnets              = join(",", var.iact_subnet_list)
-  iact_time_limit           = var.iact_subnet_time_limit
+  operational_mode          = local.fdo_operational_mode
+
+  cert_file          = "/etc/ssl/private/terraform-enterprise/cert.pem"
+  key_file           = "/etc/ssl/private/terraform-enterprise/key.pem"
+  tfe_image          = var.tfe_image
+  tls_ca_bundle_file = var.ca_certificate_secret_id != null ? "/etc/ssl/private/terraform-enterprise/bundle.pem" : null
+  tls_ciphers        = var.tls_ciphers
+  tls_version        = var.tls_version
+
+  capacity_concurrency = var.capacity_concurrency
+  capacity_cpu         = var.capacity_cpu
+  capacity_memory      = var.capacity_memory
+  iact_subnets         = join(",", var.iact_subnet_list)
+  iact_time_limit      = var.iact_subnet_time_limit
+  run_pipeline_image   = var.run_pipeline_image
 
   database_name       = local.database.name
   database_user       = local.database.username
@@ -159,6 +168,8 @@ module "docker_compose_config" {
   redis_use_tls  = local.redis.use_tls
   redis_use_auth = local.redis.use_password_auth
 
+  trusted_proxies = local.trusted_proxies
+
   vault_address   = var.extern_vault_addr
   vault_namespace = var.extern_vault_namespace
   vault_path      = var.extern_vault_path
@@ -174,7 +185,7 @@ module "tfe_init_fdo" {
   count  = var.is_replicated_deployment ? 0 : 1
 
   cloud             = "aws"
-  operational_mode  = var.operational_mode
+  operational_mode  = local.fdo_operational_mode
   custom_image_tag  = var.custom_image_tag
   enable_monitoring = var.enable_monitoring
 
@@ -186,19 +197,14 @@ module "tfe_init_fdo" {
   certificate_secret_id    = var.vm_certificate_secret_id == null ? null : var.vm_certificate_secret_id
   key_secret_id            = var.vm_key_secret_id == null ? null : var.vm_key_secret_id
 
-  proxy_ip   = var.proxy_ip
-  proxy_port = var.proxy_port
-  extra_no_proxy = concat([
-    "127.0.0.1",
-    "169.254.169.254",
-    ".aws.ce.redhat.com",
-    "secretsmanager.${data.aws_region.current.name}.amazonaws.com",
-    local.fqdn,
-    var.network_cidr
-  ], var.no_proxy)
+  proxy_ip       = var.proxy_ip != null ? var.proxy_ip : null
+  proxy_port     = var.proxy_ip != null ? var.proxy_port : null
+  extra_no_proxy = var.proxy_ip != null ? local.no_proxy : null
 
-  registry_username   = var.registry_username
-  registry_password   = var.registry_password
+  registry          = var.registry
+  registry_password = var.registry == "images.releases.hashicorp.com" ? var.hc_license : var.registry_password
+  registry_username = var.registry_username
+
   docker_compose_yaml = module.docker_compose_config[0].docker_compose_yaml
 
   fqdn=local.fqdn
@@ -223,18 +229,11 @@ module "settings" {
   metrics_endpoint_enabled      = var.metrics_endpoint_enabled
   metrics_endpoint_port_http    = var.metrics_endpoint_port_http
   metrics_endpoint_port_https   = var.metrics_endpoint_port_https
-  trusted_proxies               = var.trusted_proxies
+  trusted_proxies               = local.trusted_proxies
   release_sequence              = var.release_sequence
   pg_extra_params               = var.pg_extra_params
 
-  extra_no_proxy = concat([
-    "127.0.0.1",
-    "169.254.169.254",
-    ".aws.ce.redhat.com",
-    "secretsmanager.${data.aws_region.current.name}.amazonaws.com",
-    local.fqdn,
-    var.network_cidr
-  ], var.no_proxy)
+  extra_no_proxy = local.no_proxy
 
   # Replicated Base Configuration
   hostname                                  = local.fqdn
@@ -336,28 +335,31 @@ module "private_tcp_load_balancer" {
 module "vm" {
   source = "./modules/vm"
 
-  active_active                       = local.active_active
-  aws_iam_instance_profile            = module.service_accounts.iam_instance_profile.name
-  ami_id                              = local.ami_id
-  aws_lb                              = var.load_balancing_scheme == "PRIVATE_TCP" ? null : module.load_balancer[0].aws_lb_security_group
-  aws_lb_target_group_tfe_tg_443_arn  = var.load_balancing_scheme == "PRIVATE_TCP" ? module.private_tcp_load_balancer[0].aws_lb_target_group_tfe_tg_443_arn : module.load_balancer[0].aws_lb_target_group_tfe_tg_443_arn
-  aws_lb_target_group_tfe_tg_8800_arn = var.load_balancing_scheme == "PRIVATE_TCP" ? module.private_tcp_load_balancer[0].aws_lb_target_group_tfe_tg_8800_arn : module.load_balancer[0].aws_lb_target_group_tfe_tg_8800_arn
-  asg_tags                            = var.asg_tags
-  default_ami_id                      = local.default_ami_id
-  enable_disk                         = local.enable_disk
-  enable_ssh                          = var.enable_ssh
-  ebs_device_name                     = var.ebs_device_name
-  ebs_volume_size                     = var.ebs_volume_size
-  ebs_volume_type                     = var.ebs_volume_type
-  ebs_iops                            = var.ebs_iops
-  ebs_delete_on_termination           = var.ebs_delete_on_termination
-  friendly_name_prefix                = var.friendly_name_prefix
-  key_name                            = var.key_name
-  instance_type                       = var.instance_type
-  is_replicated_deployment            = var.is_replicated_deployment
-  network_id                          = local.network_id
-  network_subnets_private             = local.network_private_subnets
-  network_private_subnet_cidrs        = local.network_private_subnet_cidrs
-  node_count                          = var.node_count
-  user_data_base64                    = var.is_replicated_deployment ? module.tfe_init_replicated[0].tfe_userdata_base64_encoded : module.tfe_init_fdo[0].tfe_userdata_base64_encoded
+  active_active                          = local.active_active
+  aws_iam_instance_profile               = module.service_accounts.iam_instance_profile.name
+  ami_id                                 = local.ami_id
+  aws_lb                                 = var.load_balancing_scheme == "PRIVATE_TCP" ? null : module.load_balancer[0].aws_lb_security_group
+  aws_lb_target_group_tfe_tg_443_arn     = var.load_balancing_scheme == "PRIVATE_TCP" ? module.private_tcp_load_balancer[0].aws_lb_target_group_tfe_tg_443_arn : module.load_balancer[0].aws_lb_target_group_tfe_tg_443_arn
+  aws_lb_target_group_tfe_tg_8800_arn    = var.load_balancing_scheme == "PRIVATE_TCP" ? module.private_tcp_load_balancer[0].aws_lb_target_group_tfe_tg_8800_arn : module.load_balancer[0].aws_lb_target_group_tfe_tg_8800_arn
+  asg_tags                               = var.asg_tags
+  ec2_launch_template_tag_specifications = var.ec2_launch_template_tag_specifications
+  default_ami_id                         = local.default_ami_id
+  enable_disk                            = local.enable_disk
+  enable_ssh                             = var.enable_ssh
+  ebs_device_name                        = var.ebs_device_name
+  ebs_volume_size                        = var.ebs_volume_size
+  ebs_volume_type                        = var.ebs_volume_type
+  ebs_iops                               = var.ebs_iops
+  ebs_delete_on_termination              = var.ebs_delete_on_termination
+  ebs_snapshot_id                        = var.ebs_snapshot_id
+  friendly_name_prefix                   = var.friendly_name_prefix
+  health_check_grace_period              = var.health_check_grace_period
+  instance_type                          = var.instance_type
+  is_replicated_deployment               = var.is_replicated_deployment
+  key_name                               = var.key_name
+  network_id                             = local.network_id
+  network_subnets_private                = local.network_private_subnets
+  network_private_subnet_cidrs           = local.network_private_subnet_cidrs
+  node_count                             = var.node_count
+  user_data_base64                       = var.is_replicated_deployment ? module.tfe_init_replicated[0].tfe_userdata_base64_encoded : module.tfe_init_fdo[0].tfe_userdata_base64_encoded
 }

@@ -10,6 +10,7 @@ locals {
   enable_database_module       = local.enable_external
   enable_object_storage_module = local.enable_external
   enable_redis_module          = local.active_active
+  fdo_operational_mode         = local.enable_disk ? "disk" : local.active_active ? "active-active" : "external"
   ami_id                       = local.default_ami_id ? data.aws_ami.ubuntu.id : var.ami_id
   default_ami_id               = var.ami_id == null
   fqdn                         = "${var.tfe_subdomain}.${var.domain_name}"
@@ -50,4 +51,36 @@ locals {
     }
   )
 
+  no_proxy = concat([
+    "127.0.0.1",
+    "169.254.169.254",
+    "secretsmanager.${data.aws_region.current.name}.amazonaws.com",
+    ".docker.com",
+    ".docker.io",
+    "localhost",
+    "s3.amazonaws.com",
+    ".s3.amazonaws.com",
+    "s3.${data.aws_region.current.name}.amazonaws.com",
+    local.fqdn,
+    var.network_cidr],
+    local.replicated_no_proxy,
+    local.rhel_no_proxy,
+    var.no_proxy
+  )
+
+  replicated_no_proxy = var.is_replicated_deployment ? [
+    ".replicated.com",
+  ] : []
+
+  rhel_no_proxy = var.distribution == "rhel" ? [
+    ".aws.ce.redhat.com",
+    ".centos.org",
+    ".subscription.rhn.redhat.com",
+    ".cdn.redhat.com",
+  ] : []
+
+  trusted_proxies = concat(
+    var.trusted_proxies,
+    var.network_private_subnet_cidrs
+  )
 }
