@@ -13,7 +13,7 @@ resource "random_string" "friendly_name" {
 # Store TFE License as secret
 # ---------------------------
 module "secrets" {
-  count  = local.utility_module_test ? 0 : 1
+  count  = local.utility_module_test || !var.is_replicated_deployment ? 0 : 1
   source = "../../fixtures/secrets"
 
   tfe_license = {
@@ -45,12 +45,15 @@ module "standalone_vault" {
   source = "../../"
 
   acm_certificate_arn   = var.acm_certificate_arn
+  disk_path             = "/opt/hashicorp/data"
   domain_name           = var.domain_name
   friendly_name_prefix  = local.friendly_name_prefix
   tfe_license_secret_id = try(module.secrets[0].tfe_license_secret_id, var.tfe_license_secret_id)
   distribution          = "ubuntu"
 
+  bypass_preflight_checks       = true
   consolidated_services_enabled = var.consolidated_services_enabled
+  health_check_grace_period     = 3000
   iam_role_policy_arns          = ["arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore", "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"]
   iact_subnet_list              = ["0.0.0.0/0"]
   instance_type                 = "m5.xlarge"
@@ -58,10 +61,13 @@ module "standalone_vault" {
   kms_key_arn                   = module.kms.key
   load_balancing_scheme         = local.load_balancing_scheme
   node_count                    = 1
+  operational_mode              = "disk"
   redis_encryption_at_rest      = false
   redis_encryption_in_transit   = false
   redis_use_password_auth       = false
   tfe_subdomain                 = local.friendly_name_prefix
+  vm_certificate_secret_id      = data.aws_secretsmanager_secret.vm_certificate.id
+  vm_key_secret_id              = data.aws_secretsmanager_secret.vm_key.id
 
   # Vault
   extern_vault_enable    = true
@@ -76,7 +82,8 @@ module "standalone_vault" {
   is_replicated_deployment  = var.is_replicated_deployment
   hc_license                = var.hc_license
   license_reporting_opt_out = true
+  registry                  = local.registry
   registry_password         = var.registry_password
   registry_username         = var.registry_username
-  tfe_image                 = "quay.io/hashicorp/terraform-enterprise:${var.tfe_image_tag}"
+  tfe_image                 = "${local.registry}/hashicorp/terraform-enterprise:${var.tfe_image_tag}"
 }

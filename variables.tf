@@ -14,6 +14,15 @@ variable "ami_id" {
   description = "AMI ID to use for TFE instances"
 }
 
+variable "ec2_launch_template_tag_specifications" {
+  description = "(Optional) List of tag specifications to apply to the launch template."
+  type = list(object({
+    resource_type = string
+    tags          = map(string)
+  }))
+  default = []
+}
+
 variable "asg_tags" {
   type        = map(string)
   description = "(Optional) Map of tags only used for the autoscaling group. If you are using the AWS provider's default_tags,please note that it tags every taggable resource except for the autoscaling group, therefore this variable may be used to duplicate the key/value pairs in the default_tags if you wish."
@@ -216,7 +225,7 @@ variable "custom_image_tag" {
 
 variable "disk_path" {
   default     = null
-  description = "The pathname of the directory in which Terraform Enterprise will store data on the compute instances."
+  description = "The pathname of the directory in which Terraform Enterprise will store data on the compute instances. Required if var.is_replicated_deployment is false and var.operational_mode is 'disk'."
   type        = string
 }
 
@@ -224,6 +233,18 @@ variable "hairpin_addressing" {
   default     = null
   type        = bool
   description = "In some cloud environments, HTTP clients running on instances behind a loadbalancer cannot send requests to the public hostname of that load balancer. Use this setting to configure TFE services to redirect requests for the installation's FQDN to the instance's internal IP address. Defaults to false."
+}
+
+variable "http_port" {
+  default     = 8080
+  type        = number
+  description = "(Optional if is_replicated_deployment is false) Port application listens on for HTTP. Default is 80."
+}
+
+variable "https_port" {
+  default     = 8443
+  type        = number
+  description = "(Optional if is_replicated_deployment is false) Port application listens on for HTTPS. Default is 443."
 }
 
 variable "iact_subnet_list" {
@@ -274,13 +295,13 @@ variable "tfe_license_file_location" {
 }
 
 variable "tls_bootstrap_cert_pathname" {
-  default     = null
+  default     = "/var/lib/terraform-enterprise/certificate.pem"
   type        = string
   description = "The path on the TFE instance to put the certificate. ex. '/var/lib/terraform-enterprise/certificate.pem'"
 }
 
 variable "tls_bootstrap_key_pathname" {
-  default     = null
+  default     = "/var/lib/terraform-enterprise/key.pem"
   type        = string
   description = "The path on the TFE instance to put the key. ex. '/var/lib/terraform-enterprise/key.pem'"
 }
@@ -369,6 +390,12 @@ variable "existing_iam_instance_role_name" {
   type        = string
 }
 
+variable "health_check_grace_period" {
+  default     = null
+  description = "The health grace period aws provides to allow for an instance to pass it's health check."
+  type        = number
+}
+
 variable "iam_role_policy_arns" {
   default     = []
   description = "A set of Amazon Resource Names of IAM role policies to be attached to the TFE IAM role."
@@ -404,16 +431,22 @@ variable "pg_extra_params" {
   description = "Parameter keywords of the form param1=value1&param2=value2 to support additional options that may be necessary for your specific PostgreSQL server. Allowed values are documented on the PostgreSQL site. An additional restriction on the sslmode parameter is that only the require, verify-full, verify-ca, and disable values are allowed."
 }
 
-variable "registry_username" {
-  default     = null
+variable "registry" {
+  default     = "images.releases.hashicorp.com"
   type        = string
-  description = "(Not needed if is_replicated_deployment is true) The username for the docker registry from which to source the terraform_enterprise container images."
+  description = "(Not needed if is_replicated_deployment is true) The docker registry from which to source the terraform_enterprise container images."
 }
 
 variable "registry_password" {
   default     = null
   type        = string
   description = "(Not needed if is_replicated_deployment is true) The password for the docker registry from which to source the terraform_enterprise container images."
+}
+
+variable "registry_username" {
+  default     = null
+  type        = string
+  description = "(Not needed if is_replicated_deployment is true) The username for the docker registry from which to source the terraform_enterprise container images."
 }
 
 variable "release_sequence" {
@@ -434,10 +467,16 @@ variable "ssl_policy" {
   description = "SSL policy to use on ALB listener"
 }
 
-variable "tls_ca_bundle_file" {
-  default     = null
+variable "tfe_image" {
+  default     = "images.releases.hashicorp.com/hashicorp/terraform-enterprise:v202311-1"
   type        = string
-  description = "(Not needed if is_replicated_deployment is true) Path to a file containing TLS CA certificates to be added to the OS CA certificates bundle. Leave blank to not add CA certificates to the OS CA certificates bundle. Defaults to ''."
+  description = "(Not needed if is_replicated_deployment is true) The registry path, image name, and image version."
+}
+
+variable "tfe_subdomain" {
+  type        = string
+  default     = "tfe"
+  description = "Subdomain for accessing the Terraform Enterprise UI."
 }
 
 variable "tls_ciphers" {
@@ -447,29 +486,18 @@ variable "tls_ciphers" {
 }
 
 variable "tls_version" {
-  default     = null
+  default     = "tls_1_2_tls_1_3"
   type        = string
   description = "(Not needed if is_replicated_deployment is true) TLS version to use. Leave blank to use both TLS v1.2 and TLS v1.3. Defaults to '' if no value is given."
   validation {
     condition = (
       var.tls_version == null ||
       var.tls_version == "tls_1_2" ||
-      var.tls_version == "tls_1_3"
+      var.tls_version == "tls_1_3" ||
+      var.tls_version == "tls_1_2_tls_1_3"
     )
     error_message = "The tls_version value must be 'tls_1_2', 'tls_1_3', or null."
   }
-}
-
-variable "tfe_image" {
-  default     = "quay.io/hashicorp/terraform-enterprise:latest"
-  type        = string
-  description = "(Not needed if is_replicated_deployment is true) The registry path, image name, and image version (e.g. \"quay.io/hashicorp/terraform-enterprise:1234567\")"
-}
-
-variable "tfe_subdomain" {
-  type        = string
-  default     = "tfe"
-  description = "Subdomain for accessing the Terraform Enterprise UI."
 }
 
 # KMS & Secrets Manager
@@ -584,6 +612,12 @@ variable "ebs_volume_type" {
     condition     = contains(["standard", "gp2", "gp3", "st1", "sc1", "io1"], var.ebs_volume_type)
     error_message = "The ebs_volume_type value must be one of: 'standard', 'gp2', 'gp3', 'st1', 'sc1', 'io1'."
   }
+}
+
+variable "ebs_snapshot_id" {
+  type        = string
+  description = "(Optional) The Snapshot ID to mount (instead of a new volume)"
+  default     = null
 }
 
 # External Vault ONLY
