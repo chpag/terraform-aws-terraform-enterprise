@@ -675,13 +675,19 @@ variable "tfe_os" {
   }
 }
 
-variable "tfe_os_ami" {
+variable "tfe_os_ami_name" {
   type       = map(string)
   default    = {
-    "ubuntu" = ""
+    "ubuntu" = "ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"
     "rhel"   = ""
   }
 }
 
-
+variable "tfe_os_ami_owner {
+  type       = map(string)
+  default    = {
+    "ubuntu" = "ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"
+    "rhel"   = ""
+  }
 }
+
